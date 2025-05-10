@@ -9,15 +9,20 @@ from sapphirepy import sapphire
 import json
 from pathlib import Path
 from typing import Union
+from MainContract import ComputeTask
+from src.SubContract import Crumb, CrumbStatus, update_crumb_to_closed
 from core.transformer_task import TransformerTask
+from src.SubContract import get_crumbs_by_status, get_crumbs_by_requester
+from src.MainContract import get_in_progress_queue
 
 
 class Orchestrator:
     def __init__(self, network: str, contract: str, pkey: str):
-        self.network = network
-        self.contract = contract
-        self.pkey = pkey
-
+        self.network: str = network
+        self.contract: str = contract
+        self.pkey: str = pkey
+        self.current_job: Crumb | None = None
+        self.selected_contract: str | None = None
         if not all(
             [
                 self.pkey,
@@ -27,7 +32,11 @@ class Orchestrator:
                           Please set PRIVATE_KEY.""")
 
         private_key_file = open(self.pkey)
-        account: LocalAccount = Account.from_key(private_key_file.read())
+        private_key_value: str = private_key_file.read()
+
+        os.environ.setdefault("PRIVATE_KEY", private_key_value)
+        print("KEY: " + str(os.environ.get("PRIVATE_KEY")))
+        account: LocalAccount = Account.from_key(private_key_value)
 
         w3 = AsyncWeb3(
             AsyncWeb3.AsyncHTTPProvider(
@@ -68,23 +77,22 @@ class Orchestrator:
         )
         return abi, bytecode
 
-    def fetch_job(self):
-        self.current_job = {
-            "name": "testjob",
-            "params": """{
-                "task_type": "sentiment-analysis",
-                "model_name": "",
-                "dataset_url": "",
-                "id_dict": {},
-                "label_dict": {},
-                "batch_size": 32,
-                "train_ds_url": "",
-                "test_ds_url": "",
-                "ds_text_column": "text",
-                "ds_id_column": "id",
-                "predict_ds_url": "https://raw.githubusercontent.com/AskingAlexander/Datasets/refs/heads/master/sample.csv"
-            }"""
-        }
+    async def fetch_job(self):
+        # Get crumbs that have been selected for work
+        MAIN_CONTRACT_ADDR = "0x123f578600F8B64B235ba9D627F121c619731275"
+        all_subcontracts: list[ComputeTask] = await get_in_progress_queue(MAIN_CONTRACT_ADDR)
+        for contract in all_subcontracts:
+            available_crumbs: list[Crumb] = await get_crumbs_by_requester(contract.subContractAddress)
+            if len(available_crumbs) > 0:
+                self.current_job = available_crumbs[0]
+                self.selected_contract = contract.subContractAddress
+
+        return self.current_job is not None
+
+    async def publish_job_results(self, result: str) -> bool:
+        if self.current_job is None:
+            raise Exception("Current job is None")
+        await update_crumb_to_closed(self.selected_contract, self.current_job.id, result)
         return True
 
 
@@ -100,10 +108,16 @@ async def start_orchestrator(
     orchestrator = Orchestrator(network, contract,  pkey)
 
     print("Starting recurring task for fetching jobs...")
-    while orchestrator.fetch_job():
+    while await orchestrator.fetch_job():
+        if orchestrator.current_job is None:
+            raise Exception(
+                "A problem occured and currently selected job is None")
         task = TransformerTask()
-        task.set_params(orchestrator.current_job["params"])
+        task.set_params(
+            orchestrator.current_job.setup_task)
         task.start_working()
 
-        print(task.get_results())
+        result_str = str(task.get_results())
+        await orchestrator.publish_job_results(result_str)
+
         await sleep(10)

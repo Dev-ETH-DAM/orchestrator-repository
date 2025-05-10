@@ -1,3 +1,4 @@
+# type:ignore
 from typing import Optional
 from src.ContractUtility import ContractUtility
 from src.utils import get_contract
