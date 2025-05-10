@@ -4,8 +4,11 @@ dataset_url_key = "dataset_url"
 id_dict_key = "id_dict"
 label_dict_key = "label_dict"
 batch_size_key = "batch_size"
-text_key = "text"
-text_id_key = "text_id"
+ds_text_key = "ds_text_column"
+ds_text_id_key = "ds_id_column"
+train_ds_url_key = "train_ds_url"
+test_ds_url_key = "test_ds_url"
+predict_ds_url_key = "predict_ds_url"
 
 
 MAX_SEQUENCE_LEN = 512

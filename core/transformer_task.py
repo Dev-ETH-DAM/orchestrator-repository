@@ -1,14 +1,17 @@
-from task import RequestedWorkTask
-from constants import *
+from core.task import RequestedWorkTask
+from core.constants import *
+
 from os.path import join
 from pathlib import Path
 from os import getcwd
 from datasets import Dataset
 from scipy.special import softmax
-import evaluate
 
+import evaluate
+import pickle
 import torch
 import numpy as np
+import pandas as pd
 
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, \
     TrainingArguments, Trainer, DataCollatorWithPadding, \
@@ -26,6 +29,11 @@ class TransformerTask(RequestedWorkTask):
     model_path = None
     output_dir = None
     batch_size = None
+    train_ds_url = None
+    test_ds_url = None
+    predict_ds_url = None
+    text_key = None
+    text_id_key = None
 
     def set_params(self, configuration_json:str):
         super().set_params(configuration_json)
@@ -34,8 +42,13 @@ class TransformerTask(RequestedWorkTask):
         self.model_name = self.params[model_name_key]
         self.dataset_url = self.params[dataset_url_key]
         self.id_dict = self.params[id_dict_key]
+        self.text_key = self.params[ds_text_key]
+        self.text_id_key = self.params[ds_text_id_key]
         self.label_dict = self.params[label_dict_key]
         self.batch_size = self.params[batch_size_key]
+        self.train_ds_url = self.params[train_ds_url_key]
+        self.test_ds_url = self.params[test_ds_url_key]
+        self.predict_ds_url = self.params[predict_ds_url_key]
 
         if len(self.model_name) == 0:
             self.model_name = None
@@ -46,7 +59,6 @@ class TransformerTask(RequestedWorkTask):
             for path_to_check in [self.model_path, self.output_dir]:
                 path = Path(path_to_check)     
                 path.mkdir(parents=True, exist_ok=True)
-
 
     def get_model_and_data_task(self, train, test):        
         id2label = self.id_dict
@@ -73,7 +85,6 @@ class TransformerTask(RequestedWorkTask):
             tokenize_function, batched=True)
 
         return (model, tokenizer, data_collator, for_train, for_test)
-
 
     def get_training_setup(self, model, 
                            for_train, for_test, 
@@ -111,11 +122,18 @@ class TransformerTask(RequestedWorkTask):
     def start_working(self):
         train = None
         test = None
-        to_predict = None
+        to_predict = pd.read_csv(self.predict_ds_url)
+        self.result_values = {}
+        self.result_params = {}
 
-        if self.model_name == None:
-            pipeline(self.task_type, model=None)('hugging face is the best')
-            return
+        if self.model_name == None:          
+            for _, row in to_predict.iterrows():
+                text = row[self.text_key]
+                text_id = row[self.text_id_key]  
+                output = pipeline(self.task_type, model=None)(text)[0]["label"]
+
+                self.result_values[text_id] = output
+            self.result_params = {model_name_key: None}
         else:
             torch.cuda.empty_cache()
             (model, tokenizer, data_collator, for_train,for_test) = self.get_model_and_data_task(train, test)
@@ -133,8 +151,7 @@ class TransformerTask(RequestedWorkTask):
             _ = trainer.train()
 
             torch.cuda.empty_cache()
-
-            self.result_values = {}
+            
             for _, row in to_predict.iterrows():
                 text = row[text_key]
                 text_id = row[text_id_key]
@@ -147,4 +164,6 @@ class TransformerTask(RequestedWorkTask):
                 predicted_label = int(probabilities.argmax())
 
                 self.result_values[text_id] = predicted_label
+                
+            self.result_params = {model_name_key: pickle.dumps(model)}
 
