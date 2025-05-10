@@ -4,5 +4,10 @@
     "dataset_url": "",
     "id_dict": {},
     "label_dict": {},
-    "batch_size": 32
+    "batch_size": 32,
+    "train_ds_url": "",
+    "test_ds_url": "",
+    "ds_text_column": "text",
+    "ds_id_column": "id",
+    "predict_ds_url": "https://raw.githubusercontent.com/AskingAlexander/Datasets/refs/heads/master/sample.csv"
 }
